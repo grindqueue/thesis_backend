@@ -1,8 +1,8 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const Parent = require("../models/parentModel");
-const { generateOTP, sendEmail } = require("../utils/email"); // your file
+const Parent = require("../database/parentModel");
+const { generateOtp, sendMail } = require("./sendMail"); // your file
 require("dotenv").config();
 
 const parentSignup = async (req, res) => {
@@ -41,7 +41,7 @@ const parentSignup = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const otp = generateOTP();
+        const otp = generateOtp();
         const otpExpires = Date.now() + 10 * 60 * 1000;
 
         const newParent = new Parent({
@@ -57,40 +57,29 @@ const parentSignup = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        await sendEmail(
-            email,
+        await sendMail(
+            newParent.email,
             "Verify your account",
             `Your OTP is ${otp}`,
             `<h3>Your OTP is: ${otp}</h3>`
         );
-        const token = jwt.sign(
-            { parentId: newParent._id, email: newParent.email },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
-
         res.status(201).json({
             message: "Parent created. Check email for OTP",
             parentId: newParent._id,
             email: newParent.email,
-            token, // optional
             isVerified: newParent.isVerified
         });
-
     } catch (error) {
-        if (session) {
+        if (session && session.inTransaction()) {
             await session.abortTransaction();
-            session.endSession();
         }
-
-        console.error("Signup error:", error);
-
+        if (session) session.endSession();
+            console.error("Signup error:", error);
         res.status(500).json({
             message: "Internal server error"
         });
     }
 };
-
 const parentSignIn = async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -123,9 +112,7 @@ const parentSignIn = async (req, res) => {
                 message: "Invalid credentials"
             });
         }
-
-        // ✅ Generate OTP for login
-        const otp = generateOTP();
+        const otp = generateOtp();
         const otpExpires = Date.now() + 10 * 60 * 1000;
 
         parent.otp = otp;
@@ -134,7 +121,7 @@ const parentSignIn = async (req, res) => {
         await parent.save();
 
         // ✅ Send OTP
-        await sendEmail(
+        await sendMail(
             email,
             "Login OTP",
             `Your OTP is ${otp}`,
@@ -151,7 +138,6 @@ const parentSignIn = async (req, res) => {
         });
     }
 };
-
 
 module.exports = {
     parentSignup,

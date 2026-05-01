@@ -1,160 +1,10 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const Parent = require("../models/parentModel");
-const { generateOTP, sendEmail } = require("../utils/email"); // your file
+const Parent = require("../database/parentModel");
 require("dotenv").config();
 
-const parentSignup = async (req, res) => {
-    let session;
-
-    try {
-        session = await mongoose.startSession();
-        session.startTransaction();
-
-        const { name, email, password } = req.body;
-
-        // ✅ Basic validation
-        if (!name || !email || !password) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({ message: "All fields are required" });
-        }
-
-        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,50}$/;
-        if (!passwordRegex.test(password)) {
-            return res.status(400).json({
-                message: "Password must include uppercase, lowercase, number, and special character"
-            });
-        }
-
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({ message: "Invalid email format" });
-        }
-
-        const existingParent = await Parent.findOne({ email });
-        if (existingParent) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(409).json({ message: "Parent already exists" });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const otp = generateOTP();
-        const otpExpires = Date.now() + 10 * 60 * 1000;
-
-        const newParent = new Parent({
-            name,
-            email,
-            password: hashedPassword,
-            otp,
-            otpExpiration: otpExpires
-        });
-
-        await newParent.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-
-        await sendEmail(
-            email,
-            "Verify your account",
-            `Your OTP is ${otp}`,
-            `<h3>Your OTP is: ${otp}</h3>`
-        );
-
-        const token = jwt.sign(
-            { parentId: newParent._id, email: newParent.email },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
-
-        res.status(201).json({
-            message: "Parent created. Check email for OTP",
-            parentId: newParent._id,
-            email: newParent.email,
-            token, // optional
-            isVerified: newParent.isVerified
-        });
-
-    } catch (error) {
-        if (session) {
-            await session.abortTransaction();
-            session.endSession();
-        }
-
-        console.error("Signup error:", error);
-
-        res.status(500).json({
-            message: "Internal server error"
-        });
-    }
-};
-
-const parentSignIn = async (req, res) => {
-    try {
-        const { email, password } = req.body;
-
-        if (!email || !password) {
-            return res.status(400).json({
-                message: "Email and password required"
-            });
-        }
-
-        const parent = await Parent.findOne({ email });
-
-        if (!parent) {
-            return res.status(404).json({
-                message: "Parent not found"
-            });
-        }
-
-        // ❗ IMPORTANT: ensure account is verified
-        if (!parent.isVerified) {
-            return res.status(403).json({
-                message: "Please verify your account first"
-            });
-        }
-
-        const isMatch = await bcrypt.compare(password, parent.password);
-
-        if (!isMatch) {
-            return res.status(400).json({
-                message: "Invalid credentials"
-            });
-        }
-
-        // ✅ Generate OTP for login
-        const otp = generateOTP();
-        const otpExpires = Date.now() + 10 * 60 * 1000;
-
-        parent.otp = otp;
-        parent.otpExpiration = otpExpires;
-
-        await parent.save();
-
-        // ✅ Send OTP
-        await sendEmail(
-            email,
-            "Login OTP",
-            `Your OTP is ${otp}`,
-            `<h3>Your login OTP is: ${otp}</h3>`
-        );
-
-        return res.status(200).json({
-            message: "OTP sent to your email"
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        });
-    }
-};
-const verifySignInOTP = async (req, res) => {
+const verifyOTP = async (req, res) => {
     const { email, otp } = req.body;
 
     try {
@@ -172,42 +22,58 @@ const verifySignInOTP = async (req, res) => {
             });
         }
 
+        // check OTP
         if (parent.otp !== otp) {
             return res.status(400).json({
                 message: "Invalid OTP"
             });
         }
 
-        if (parent.otpExpiration < Date.now()) {
+        // check expiry
+        if (!parent.otpExpiration || parent.otpExpiration < Date.now()) {
             return res.status(400).json({
                 message: "OTP expired"
             });
         }
 
-        // clear OTP
+        // mark verified (optional but useful for signup tracking)
+        if (parent.isVerified === false) {
+            parent.isVerified = true;
+            await parent.save();
+        }
+
+        // clear OTP after use
         parent.otp = undefined;
         parent.otpExpiration = undefined;
+
         await parent.save();
 
-        // ✅ ISSUE SHORT TOKEN (10 mins)
+        // 🔐 ISSUE TOKEN (LOGIN SUCCESS)
         const token = jwt.sign(
-            { parentId: parent._id, email: parent.email },
+            {
+                parentId: parent._id,
+                email: parent.email
+            },
             process.env.JWT_SECRET,
-            { expiresIn: "10m" } // 🔥 THIS IS WHAT YOU WANTED
+            { expiresIn: "10m" }
         );
 
-        res.status(200).json({
+        return res.status(200).json({
             message: "Login successful",
-            token
+            token,
+            parent: {
+                id: parent._id,
+                email: parent.email,
+                isVerified: parent.isVerified
+            }
         });
 
     } catch (error) {
-        res.status(500).json({
+        return res.status(500).json({
             message: error.message
         });
     }
 };
-
 const verifyParentToken = (req, res, next) => {
     const authHeader = req.headers.authorization;
 
@@ -223,11 +89,7 @@ const verifyParentToken = (req, res, next) => {
         return res.status(401).json({ message: "Invalid or expired token" });
     }
 }
-
-
 module.exports = {
-    parentSignup,
-    parentSignIn,
-    verifySignInOTP,
+    verifyOTP,
     verifyParentToken
 };

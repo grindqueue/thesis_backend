@@ -1,6 +1,8 @@
 const express = require('express');
 const app = express();
 
+const parentRouter = require('./router/parentRouter');
+
 const connectToDatabase = require('./database/connectToDatabase');
 connectToDatabase();
 
@@ -13,3 +15,5 @@ app.listen(3000, () => {
 app.get("/", (req, res) => {
     res.send("Welcome to the Parental Control Backend API");
 })
+
+app.use('/auth', parentRouter);
