@@ -59,7 +59,7 @@ const verifyOTP = async (req, res) => {
         );
 
         return res.status(200).json({
-            message: "Login successful",
+            message: "Success",
             token,
             parent: {
                 id: parent._id,

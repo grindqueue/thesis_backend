@@ -5,6 +5,7 @@ const Parent = require("../database/parentModel");
 const { generateOtp, sendMail } = require("./sendMail"); // your file
 require("dotenv").config();
 
+
 const parentSignup = async (req, res) => {
     let session;
 
@@ -12,14 +13,17 @@ const parentSignup = async (req, res) => {
         session = await mongoose.startSession();
         session.startTransaction();
 
-        const { name, email, password } = req.body;
+        const { name, email, password, confirmPassword } = req.body;
 
-        if (!name || !email || !password) {
+        if (!name || !email || !password || !confirmPassword) {
             await session.abortTransaction();
             session.endSession();
             return res.status(400).json({ message: "All fields are required" });
         }
-
+        if (password !== confirmPassword) {
+            res.status(403).json({ message: "Password does not match" });
+            await session.abortTransaction();
+        }
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,50}$/;
         if (!passwordRegex.test(password)) {
             return res.status(400).json({
@@ -60,7 +64,7 @@ const parentSignup = async (req, res) => {
         await sendMail(
             newParent.email,
             "Verify your account",
-            `Your OTP is ${otp}`,
+            `This OTP expires in 10 minutes ${otp}`,
             `<h3>Your OTP is: ${otp}</h3>`
         );
         res.status(201).json({
@@ -124,7 +128,7 @@ const parentSignIn = async (req, res) => {
         await sendMail(
             email,
             "Login OTP",
-            `Your OTP is ${otp}`,
+            `This OTP expires in 10 minutes ${otp}`,
             `<h3>Your login OTP is: ${otp}</h3>`
         );
 
@@ -138,8 +142,45 @@ const parentSignIn = async (req, res) => {
         });
     }
 };
+const resendOTP = async (req, res) => {
+    const { email } = req.body;
 
+    try{
+        if (!email) {
+            return res.status(400).json({
+                message: "Email required"
+            });
+        }
+        const parent = await Parent.findOne({ email });
+
+        if (!parent) {
+            return res.status(404).json({
+                message: "Parent not found"
+            });
+        }
+        const otp = generateOtp();
+        const otpExpires = Date.now() + 10 * 60 * 1000;
+        parent.otp = otp;
+        parent.otpExpiration = otpExpires;
+        await parent.save();
+        await sendMail(
+            email,
+            "DON'T LOOSE THIS ONE TOO",
+            `Make sure you verify before 10 mins ${otp}`,
+            `<h3>Your new OTP is: ${otp}</h3>`
+            );
+        return res.status(200).json({
+            message: "New OTP sent to your email"
+        });
+
+    }catch (error) {
+        res.status(500).json({
+            message: error.message
+        });
+    }
+}
 module.exports = {
     parentSignup,
-    parentSignIn
+    parentSignIn,
+    resendOTP
 };
