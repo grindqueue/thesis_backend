@@ -156,7 +156,65 @@ const childSignUp = async (req, res) => {
         });
     }
 };
+const getChildren = async(req, res) => {
+    try{
+        const { parentId } = req.params;
 
+        if (!mongoose.Types.ObjectId.isValid(parentId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid parentId format'
+            });
+        }
+        const parent = await Parent.findById(parentId);
+
+        if (!parent) {
+            return res.status(404).json({
+                success: false,
+                message: 'Parent account not found'
+            });
+        }
+        const children = await Child.find({ parentId });
+
+        return res.status(200).json({
+            success: true,
+            children
+        });
+    } catch (error) {
+        console.error('Get children error:', error.message);
+        return res.status(500).json({
+            success: false,
+            message: 'Error retrieving children'
+        });
+    }
+}
+const getChild = async (req, res) => {
+    try{
+        const { childId } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(childId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid childId format'
+            });
+        }
+        const child = await Child.findById(childId);
+
+        if (!child) {
+            return res.status(404).json({
+                success: false,
+                message: 'Child account not found'
+            });
+        }
+        return res.status(200).json({ success: true, childDetails: child });
+    }catch{
+        return res.status(500).json({
+            success: false,
+            message: 'Error retrieving child details'
+        });
+    }
+}
 module.exports = {
-    childSignUp
+    childSignUp,
+    getChildren,
+    getChild
 };
