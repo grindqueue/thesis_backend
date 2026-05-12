@@ -3,7 +3,6 @@ const parentRouter = express.Router();
 
 const {parentSignIn, parentSignup, resendOTP} = require('../controllers/parentAuth');
 const {verifyOTP, verifyParentToken} = require("../middlewares/verifyOTP");
-const {getChildren} = require('../controllers/childAuth');
 
 parentRouter.post('/parent/signup', parentSignup);
 parentRouter.post('/parent/signin', parentSignIn);
