@@ -1,13 +1,14 @@
 const express = require("express");
 
 const { childSignUp } = require("../controllers/ChildAuth");
-const  {upload } = require('../middlewares/upload')
+const  {upload, verifyParentToken } = require('../middlewares/verifyOTP');
 
 const childRouter = express.Router();
 
 const upload = multer({ dest: "uploads/" });
 childRouter.post(
-    '/signup',
+    '/signup', 
+    verifyParentToken,
     upload.single('idDocument'),
     childSignUp
 );

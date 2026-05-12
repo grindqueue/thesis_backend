@@ -29,7 +29,6 @@ const parentSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: "Child",
     }],
-
 }, {
     timestamps: true,
 });
