@@ -1,73 +1,158 @@
-const child = require('./database/childModel');
-const fs = require('fs');
-const axios = require("axios");
-require('dotenv').config();
+const fs = require('fs').promises;
+const axios = require('axios');
+const mongoose = require('mongoose');
+const Child = require('../database/childModel');
+const Parent = require('../database/parentModel');
 
 const childSignUp = async (req, res) => {
+    let filePath = null;
+
     try {
         const { name, age, parentId, deviceId } = req.body;
+
+        // =========================
+        // Validate required fields
+        // =========================
         if (!name || !age || !parentId || !deviceId) {
             return res.status(400).json({
-                message: "Name, age, parentId and deviceId are required"
+                success: false,
+                message: 'Name, age, parentId and deviceId are required'
             });
         }
-        if (parentId)
 
+        // =========================
+        // Validate parent ID format
+        // =========================
+        if (!mongoose.Types.ObjectId.isValid(parentId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid parentId format'
+            });
+        }
+
+        // =========================
+        // Verify parent exists
+        // =========================
+        const parentExists = await Parent.findById(parentId);
+
+        if (!parentExists) {
+            return res.status(404).json({
+                success: false,
+                message: 'Parent account not found'
+            });
+        }
+
+        // =========================
+        // Validate uploaded file
+        // =========================
         if (!req.file) {
             return res.status(400).json({
-                message: "ID document is required"
+                success: false,
+                message: 'ID document is required'
             });
         }
 
-        const filePath = req.file.path;
+        filePath = req.file.path;
 
-        const fileData = fs.readFileSync(filePath, { encoding: 'base64' });
+        // =========================
+        // Prevent duplicate devices
+        // =========================
+        const existingChild = await Child.findOne({ deviceId });
 
+        if (existingChild) {
+            return res.status(409).json({
+                success: false,
+                message: 'A child account already exists for this device'
+            });
+        }
+
+        // =========================
+        // Read file safely
+        // =========================
+        const fileData = await fs.readFile(filePath, {
+            encoding: 'base64'
+        });
+
+        // =========================
+        // Send document to ID Analyzer
+        // =========================
         const response = await axios.post(
-            "https://api.idanalyzer.com/scan",
+            'https://api.idanalyzer.com/scan',
             {
                 api_key: process.env.ID_ANALYSER_KEY,
                 file_base64: fileData,
                 return_confidence: true
+            },
+            {
+                timeout: 30000
             }
         );
 
-        fs.unlinkSync(filePath);
+        // =========================
+        // Cleanup uploaded file
+        // =========================
+        await fs.unlink(filePath);
+        filePath = null;
 
         const data = response.data;
 
+        // =========================
+        // Validate ID verification response
+        // =========================
         if (!data || data.document_validity !== true) {
             return res.status(400).json({
-                message: "Invalid ID document"
+                success: false,
+                message: 'Invalid ID document'
             });
         }
-        const newChild = new child({
+
+        // Optional confidence check
+        if (data.confidence && data.confidence < 0.7) {
+            return res.status(400).json({
+                success: false,
+                message: 'Low confidence document scan'
+            });
+        }
+
+        // =========================
+        // Create child account
+        // =========================
+        const newChild = new Child({
             name,
             age,
             parentId,
             deviceId,
             verified: true,
-            nationality: data.country
+            nationality: data.country || 'Unknown'
         });
 
         await newChild.save();
 
-        res.status(201).json({
-            message: "Child account created successfully",
+        return res.status(201).json({
+            success: true,
+            message: 'Child account created successfully',
             child: newChild
         });
 
     } catch (err) {
-        console.error(err.response?.data || err.message);
+        console.error('Child signup error:', err.response?.data || err.message);
 
-        // delete file if error
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
+        // Cleanup file if an error occurs
+        try {
+            if (filePath) {
+                await fs.unlink(filePath);
+            }
+        } catch (cleanupError) {
+            console.error('File cleanup error:', cleanupError.message);
         }
 
-        res.status(500).json({
-            message: "Error creating child account",
-            error: err.message
+        return res.status(500).json({
+            success: false,
+            message: 'Error creating child account',
+            error:
+                process.env.NODE_ENV === 'development'
+                    ? err.message
+                    : undefined
         });
     }
 };

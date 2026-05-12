@@ -1,11 +1,15 @@
 const express = require("express");
-const multer = require("multer");
-const { childSignUp } = require("../controllers/childController");
+
+const { childSignUp } = require("../controllers/ChildAuth");
+const  {upload } = require('../middlewares/upload')
 
 const childRouter = express.Router();
 
 const upload = multer({ dest: "uploads/" });
-
-childRouter.post("/child/signup", upload.single("id_image"), childSignUp);
+childRouter.post(
+    '/signup',
+    upload.single('idDocument'),
+    childSignUp
+);
 
 module.exports = childRouter;

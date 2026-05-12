@@ -5,7 +5,7 @@ const app = express();
 app.use(cors());
 
 const parentRouter = require('./router/parentRouter');
-
+const childRouter = require('./router/childRouter');
 const connectToDatabase = require('./database/connectToDatabase');
 connectToDatabase();
 
@@ -20,3 +20,4 @@ app.get("/", (req, res) => {
 })
 
 app.use('/auth', parentRouter);
+app.use("/auth/child", childRouter);
